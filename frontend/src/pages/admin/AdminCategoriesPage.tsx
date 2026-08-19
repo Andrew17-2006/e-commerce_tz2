@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FieldError } from "@/components/common/FieldError";
 import { useCategories, useCreateCategory, useDeleteCategory, useUpdateCategory } from "@/hooks/useCategories";
 import { apiErrorMessage } from "@/api/client";
 import type { Category } from "@/types/api";
@@ -17,11 +18,6 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = { name: "", slug: "", description: "" };
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="text-xs text-destructive mt-1">{message}</p>;
-}
 
 export function AdminCategoriesPage() {
   const { data: categories, isLoading } = useCategories();

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FieldError } from "@/components/common/FieldError";
 import { useCart } from "@/hooks/useCart";
 import { useCheckout } from "@/hooks/useOrders";
 import { apiErrorMessage } from "@/api/client";
@@ -23,11 +24,6 @@ const INITIAL_FORM: FormState = {
   cardExpiry: "",
   cardCvc: "",
 };
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="text-xs text-destructive mt-1">{message}</p>;
-}
 
 export function CheckoutPage() {
   const navigate = useNavigate();

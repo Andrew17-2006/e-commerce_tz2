@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FieldError } from "@/components/common/FieldError";
 import { useLogin, useRegister } from "@/hooks/useAuth";
 import { apiErrorMessage } from "@/api/client";
 import { cn } from "@/components/ui/utils";
@@ -80,18 +81,18 @@ export function AuthPage() {
               <div>
                 <Label>Full name</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Olena Kovalenko" />
-                {errors.name && <p className="text-xs text-destructive mt-1">{errors.name}</p>}
+                <FieldError message={errors.name} />
               </div>
             )}
             <div>
               <Label>Email</Label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-              {errors.email && <p className="text-xs text-destructive mt-1">{errors.email}</p>}
+              <FieldError message={errors.email} />
             </div>
             <div>
               <Label>Password</Label>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min. 8 characters" />
-              {errors.password && <p className="text-xs text-destructive mt-1">{errors.password}</p>}
+              <FieldError message={errors.password} />
             </div>
             <Button type="submit" className="w-full" size="lg" disabled={pending}>
               {pending ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}

@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FieldError } from "@/components/common/FieldError";
 import { useCategories } from "@/hooks/useCategories";
 import {
   useCreateProduct,
@@ -39,11 +40,6 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = { name: "", categoryId: "", price: "", stock: "", description: "", imageUrl: "" };
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="text-xs text-destructive mt-1">{message}</p>;
-}
 
 export function AdminProductsPage() {
   const [search, setSearch] = useState("");
