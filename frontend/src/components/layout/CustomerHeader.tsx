@@ -1,17 +1,30 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Search, ShoppingCart, User } from "lucide-react";
 import { useAuthStore } from "@/stores/auth.store";
 import { useCart } from "@/hooks/useCart";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export function CustomerHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [q, setQ] = useState("");
+  const debouncedQ = useDebouncedValue(q, 300);
+  const isFirstRun = useRef(true);
   const user = useAuthStore((s) => s.user);
   const { data: cart } = useCart();
   const cartCount = cart?.reduce((sum, item) => sum + item.qty, 0) ?? 0;
 
-  const handleSearch = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (isFirstRun.current) {
+      isFirstRun.current = false;
+      return;
+    }
+    navigate(debouncedQ ? `/?search=${encodeURIComponent(debouncedQ)}` : "/", { replace: location.pathname === "/" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ]);
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     navigate(q ? `/?search=${encodeURIComponent(q)}` : "/");
   };
@@ -22,7 +35,7 @@ export function CustomerHeader() {
         <Link to="/" className="font-display text-xl font-semibold text-foreground tracking-tight shrink-0 hover:opacity-80 transition-opacity">
           mini<span className="text-primary">shop</span>
         </Link>
-        <form className="flex-1 hidden sm:flex max-w-md mx-auto relative" onSubmit={handleSearch}>
+        <form className="flex-1 hidden sm:flex max-w-md mx-auto relative" onSubmit={handleSubmit}>
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={q}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, Package, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useProducts } from "@/hooks/useProducts";
 import { useCategories } from "@/hooks/useCategories";
 import { useAddToCart } from "@/hooks/useCart";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useAuthStore } from "@/stores/auth.store";
 import { CategoryPill } from "@/components/catalog/CategoryPill";
 import { ProductCard } from "@/components/catalog/ProductCard";
@@ -19,20 +20,23 @@ export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
   const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
   const [minPrice, setMinPrice] = useState("");
+  const debouncedMinPrice = useDebouncedValue(minPrice, 300);
   const [maxPrice, setMaxPrice] = useState("");
+  const debouncedMaxPrice = useDebouncedValue(maxPrice, 300);
 
   const { data: categories } = useCategories();
   const query: ProductQuery = {
     page,
     limit: PER_PAGE,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     categoryId,
     sort,
-    minPrice: minPrice ? Number(minPrice) : undefined,
-    maxPrice: maxPrice ? Number(maxPrice) : undefined,
+    minPrice: debouncedMinPrice ? Number(debouncedMinPrice) : undefined,
+    maxPrice: debouncedMaxPrice ? Number(debouncedMaxPrice) : undefined,
   };
   const { data, isLoading } = useProducts(query);
   const addToCart = useAddToCart();
@@ -43,6 +47,26 @@ export function CatalogPage() {
     setSearch(urlSearch);
     setPage(1);
   }, [searchParams]);
+
+  const isFirstSearchSync = useRef(true);
+  useEffect(() => {
+    if (isFirstSearchSync.current) {
+      isFirstSearchSync.current = false;
+      return;
+    }
+    setPage(1);
+    setSearchParams(debouncedSearch ? { search: debouncedSearch } : {}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
+
+  const isFirstPriceSync = useRef(true);
+  useEffect(() => {
+    if (isFirstPriceSync.current) {
+      isFirstPriceSync.current = false;
+      return;
+    }
+    setPage(1);
+  }, [debouncedMinPrice, debouncedMaxPrice]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1;
 
@@ -67,11 +91,7 @@ export function CatalogPage() {
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-              setSearchParams(e.target.value ? { search: e.target.value } : {});
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search..."
             className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-input-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
@@ -84,7 +104,7 @@ export function CatalogPage() {
             type="number"
             min={0}
             value={minPrice}
-            onChange={(e) => { setMinPrice(e.target.value); setPage(1); }}
+            onChange={(e) => setMinPrice(e.target.value)}
             placeholder="Min $"
             className="w-20 px-3 py-2.5 rounded-xl bg-input-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
@@ -92,7 +112,7 @@ export function CatalogPage() {
             type="number"
             min={0}
             value={maxPrice}
-            onChange={(e) => { setMaxPrice(e.target.value); setPage(1); }}
+            onChange={(e) => setMaxPrice(e.target.value)}
             placeholder="Max $"
             className="w-20 px-3 py-2.5 rounded-xl bg-input-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
