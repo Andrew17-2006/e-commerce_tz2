@@ -17,9 +17,9 @@ export function AdminSidebar() {
   return (
     <aside className="w-56 bg-sidebar border-r border-sidebar-border flex flex-col h-screen sticky top-0 shrink-0">
       <div className="px-5 py-5 border-b border-sidebar-border">
-        <span className="font-display text-lg font-semibold text-foreground tracking-tight">
+        <Link to="/" className="font-display text-lg font-semibold text-foreground tracking-tight hover:opacity-80 transition-opacity">
           mini<span className="text-primary">shop</span>
-        </span>
+        </Link>
         <span className="ml-2 text-[10px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full uppercase tracking-wide">
           Admin
         </span>
