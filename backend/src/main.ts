@@ -25,7 +25,7 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Mini Marketplace API')
-    .setDescription('Catalog, cart, orders, and analytics for the Mini Marketplace test assignment')
+    .setDescription('Каталог, кошик, замовлення та аналітика для тестового завдання Mini Marketplace')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

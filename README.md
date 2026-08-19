@@ -1,100 +1,100 @@
 # Mini Marketplace
 
-A small e-commerce/marketplace built for the "Mini E-commerce / Marketplace" test assignment: product catalog, cart, checkout with atomic stock decrement, order management, and an admin dashboard.
+Невеликий e-commerce/маркетплейс, зроблений для тестового завдання "Mini E-commerce / Marketplace": каталог товарів, кошик, оформлення замовлення з атомарним списанням зі складу, керування замовленнями та адмін-дашборд.
 
-**Stack:** NestJS (TypeScript) · React (TypeScript, Vite) · PostgreSQL + Prisma · Redis (cache) · BullMQ (queue) · Docker Compose · JWT auth · Storybook.
+**Стек:** NestJS (TypeScript) · React (TypeScript, Vite) · PostgreSQL + Prisma · Redis (кеш) · BullMQ (черга) · Docker Compose · JWT-автентифікація · Storybook.
 
-The frontend UI is built on a Figma-exported design (shadcn/ui component kit + a custom Tailwind v4 theme), wired up to the real API described below.
+Інтерфейс фронтенду побудований на дизайні, експортованому з Figma (набір компонентів shadcn/ui + кастомна Tailwind v4 тема), і підключений до реального API, описаного нижче.
 
 ---
 
-## 1. Architecture
+## 1. Архітектура
 
 ```
 /backend    NestJS API (auth, users, categories, products, cart, orders, analytics)
-/frontend   React + Vite SPA (customer storefront + admin panel), Storybook
+/frontend   React + Vite SPA (вітрина для покупця + адмін-панель), Storybook
 docker-compose.yml   postgres + redis + backend + frontend (nginx)
 ```
 
-Both apps live in one npm-workspaces monorepo so they share a single `package.json`/lockfile and can each ship a small, independent Dockerfile.
+Обидва застосунки живуть в одному npm-workspaces монорепозиторії — спільний `package.json`/lock-файл, і при цьому кожен збирається в окремий легкий Dockerfile.
 
-### Backend module layout
+### Структура бекенд-модулів
 
-`src/{auth,users,categories,products,cart,orders,analytics}` — each follows **controller → service → repository/DTO** separation. Cross-cutting infrastructure lives in `prisma/` (global `PrismaService`), `redis/` (cache client + `CacheService`), `queue/` (BullMQ registration), and `common/` (global exception filter, JWT/roles guards, decorators).
+`src/{auth,users,categories,products,cart,orders,analytics}` — кожен модуль дотримується розділення **controller → service → repository/DTO**. Наскрізна інфраструктура лежить у `prisma/` (глобальний `PrismaService`), `redis/` (клієнт кешу + `CacheService`), `queue/` (реєстрація BullMQ) та `common/` (глобальний exception filter, JWT/roles guards, декоратори, санітизація вхідних даних).
 
-- **Auth**: JWT access (15m) + refresh (7d, rotated and stored bcrypt-hashed per user) tokens, `CUSTOMER`/`ADMIN` roles, a global `JwtAuthGuard` (escape-hatched with `@Public()`) plus a `RolesGuard` (`@Roles(Role.ADMIN)`) on admin-only routes.
-- **Products**: search/filter/sort/pagination, Redis cache-aside on list + detail reads, image upload (file **or** URL).
-- **Cart**: one row per `(user, product)`, quantity clamped against live stock on every mutation.
-- **Orders**: the checkout endpoint is the core of the assignment — see §2.
-- **Analytics**: revenue/order summary, top-5 products, sales-by-day, CSV export — all admin-only.
+- **Auth**: JWT access (15хв) + refresh (7 днів, ротується та зберігається у вигляді bcrypt-хешу для кожного користувача), ролі `CUSTOMER`/`ADMIN`, глобальний `JwtAuthGuard` (обходиться декоратором `@Public()`) плюс `RolesGuard` (`@Roles(Role.ADMIN)`) на маршрутах лише для адміна.
+- **Products**: пошук/фільтрація/сортування/пагінація, Redis cache-aside для списку й деталей товару, завантаження зображення (файлом **або** URL).
+- **Cart**: один рядок на пару `(user, product)`, кількість обмежується актуальним залишком при кожній зміні.
+- **Orders**: ендпоінт оформлення замовлення — ядро завдання, див. §2.
+- **Analytics**: зведення по виручці/замовленнях, топ-5 товарів, продажі по днях, експорт у CSV — усе лише для адміна.
 
-### Frontend layout
+### Структура фронтенду
 
-`src/{pages,components,hooks,api,stores,routes}` — TanStack Query owns all server state (including the cart, which is server-side per logged-in user) with **optimistic updates** on cart add/update/remove (`onMutate` → optimistic cache write → rollback on error → refetch on settle). Zustand holds only the auth token/user (persisted to `localStorage`). `components/ui/*` is the shadcn/ui kit; `components/catalog`, `components/common`, `components/layout` are bespoke pieces kept close to the original Figma design tokens in `styles/theme.css`.
+`src/{pages,components,hooks,api,stores,routes}` — весь серверний стан (включно з кошиком, який зберігається на бекенді для кожного залогіненого користувача) керується через TanStack Query з **оптимістичними оновленнями** при додаванні/зміні/видаленні товару з кошика (`onMutate` → оптимістичний запис у кеш → відкат при помилці → повторний запит після завершення). Zustand зберігає лише токен автентифікації/користувача (персиститься в `localStorage`). `components/ui/*` — набір shadcn/ui; `components/catalog`, `components/common`, `components/layout` — власні компоненти, наближені до вихідних Figma-токенів у `styles/theme.css`.
 
 ---
 
-## 2. The key requirement: race-condition-safe stock decrement
+## 2. Ключова вимога: безпечне до конкурентного доступу списання зі складу
 
-Checkout (`POST /orders/checkout`, [orders.service.ts](backend/src/orders/orders.service.ts)) runs inside **one Prisma interactive transaction**:
+Оформлення замовлення (`POST /orders/checkout`, [orders.service.ts](backend/src/orders/orders.service.ts)) виконується в **одній інтерактивній Prisma-транзакції**:
 
-1. For every cart line, [`InventoryService.decrementStock`](backend/src/orders/inventory.service.ts) runs a **conditional raw `UPDATE`**:
+1. Для кожного рядка кошика [`InventoryService.decrementStock`](backend/src/orders/inventory.service.ts) виконує **умовний сирий `UPDATE`**:
    ```sql
    UPDATE "Product" SET stock = stock - $qty WHERE id = $productId AND stock >= $qty
    ```
-   If the affected-row count is `0`, it throws `ConflictException` immediately.
-2. The `Order` + `OrderItem`s (with product name/price **snapshotted** at purchase time) are created.
-3. The purchased `CartItem` rows are deleted.
+   Якщо кількість змінених рядків дорівнює `0`, одразу кидається `ConflictException`.
+2. Створюються `Order` та `OrderItem` (з назвою/ціною товару, **зафіксованими** на момент покупки).
+3. Видаляються рядки `CartItem`, які щойно купили.
 
-If any step fails, the whole transaction rolls back — no partial order, no oversold stock, cart left untouched. The safety comes from Postgres's row-level write lock on the conditional `UPDATE`, not from transaction isolation level: two concurrent checkouts racing the last unit can only have one `UPDATE` touch the row first — the other's `WHERE stock >= qty` then evaluates false against the already-decremented value and returns 0 rows.
+Якщо будь-який крок падає, уся транзакція відкочується — жодного часткового замовлення, жодного перепродажу складу, кошик лишається незмінним. Безпека забезпечується блокуванням рядка на рівні запису Postgres під час умовного `UPDATE`, а не рівнем ізоляції транзакції: якщо два одночасні checkout'и змагаються за останню одиницю товару, лише один `UPDATE` встигне змінити рядок першим — у другого умова `WHERE stock >= qty` після цього стане хибною для вже зменшеного значення, і він поверне 0 рядків.
 
-This is proven directly by an e2e test that fires two concurrent checkout requests at a stock-1 product and asserts exactly one succeeds ([`test/e2e/checkout.e2e-spec.ts`](backend/test/e2e/checkout.e2e-spec.ts)) — see §5.
+Це прямо доведено e2e-тестом, який одночасно надсилає два запити на checkout товару з залишком 1 і перевіряє, що успішним стає рівно один ([`test/e2e/checkout.e2e-spec.ts`](backend/test/e2e/checkout.e2e-spec.ts)) — див. §5.
 
-Stock decrement is **synchronous** (inside the HTTP request); only the downstream `NEW → PROCESSING` transition and processing-delay simulation are offloaded to a BullMQ queue ([`orders.processor.ts`](backend/src/orders/orders.processor.ts)), guarded so a queued job can never clobber a status an admin already changed in the meantime. Cancelling an order (by an admin) restocks the affected products in its own transaction. Orders that are already `COMPLETED`/`CANCELLED` reject further status changes (`ConflictException`) — the "editing an already-processed order" edge case.
-
----
-
-## 3. Why these choices
-
-- **PostgreSQL + Prisma over MongoDB**: the assignment's hardest requirement is atomic, race-safe stock decrement across relational entities (Product ↔ Order ↔ OrderItem). Postgres gives ACID transactions and row-level locking for free; Prisma gives typed queries/migrations and, when needed (as above), an escape hatch to raw SQL via `$executeRaw` inside `$transaction`.
-- **BullMQ + Redis for order processing** rather than doing everything synchronously: only the stock-affecting work stays in the request; the "process order" simulation is exactly the kind of unit of work that shouldn't block the checkout response.
-- **Redis cache-aside for the product catalog**, invalidated via a single `products:cache-version` counter incremented on any product/category write (embedded in every list cache key) — O(1) invalidation, no `SCAN`/pattern-delete edge cases.
-- **Zustand for auth only; TanStack Query for everything else** (including cart) — the cart is a real server resource tied to checkout/order history, not transient client state, so it belongs in the query cache where optimistic updates are a first-class feature.
-- **npm workspaces** over pnpm/Nx/Turborepo — nothing beyond npm was needed for two apps and it wires cleanly into two independent Dockerfiles.
+Списання зі складу відбувається **синхронно** (у межах HTTP-запиту); лише подальший перехід `NEW → PROCESSING` та симуляція затримки обробки винесені в чергу BullMQ ([`orders.processor.ts`](backend/src/orders/orders.processor.ts)), з захистом від ситуації, коли задача з черги могла б перезаписати статус, який адмін вже встиг змінити вручну. Скасування замовлення (адміном) повертає товар на склад в окремій транзакції. Замовлення, які вже мають статус `COMPLETED`/`CANCELLED`, відхиляють подальшу зміну статусу (`ConflictException`) — це закриває edge-кейс "редагування вже обробленого замовлення".
 
 ---
 
-## 4. Running it
+## 3. Чому саме такі рішення
 
-### Docker (the intended way)
+- **PostgreSQL + Prisma замість MongoDB**: найскладніша вимога завдання — атомарне, безпечне до конкурентного доступу списання складу між пов'язаними сутностями (Product ↔ Order ↔ OrderItem). Postgres з коробки дає ACID-транзакції та блокування на рівні рядка; Prisma дає типізовані запити/міграції і, за потреби (як вище), шлях до сирого SQL через `$executeRaw` всередині `$transaction`.
+- **BullMQ + Redis для обробки замовлень** замість повністю синхронної обробки: у запиті лишається тільки те, що впливає на склад; симуляція "обробки замовлення" — це якраз той вид роботи, який не повинен блокувати відповідь на checkout.
+- **Redis cache-aside для каталогу товарів**, інвалідація через єдиний лічильник `products:cache-version`, який інкрементується при будь-якому записі товару/категорії (і вбудований у кожен ключ кешу списку) — інвалідація за O(1), без edge-кейсів `SCAN`/pattern-delete.
+- **Zustand лише для авторизації; TanStack Query — для всього іншого** (включно з кошиком) — кошик є реальним серверним ресурсом, пов'язаним із checkout/історією замовлень, а не тимчасовим клієнтським станом, тож його місце в кеші запитів, де оптимістичні оновлення — вбудована можливість.
+- **npm workspaces** замість pnpm/Nx/Turborepo — для двох застосунків нічого понад npm не знадобилось, і це чисто інтегрується у два незалежні Dockerfile.
+
+---
+
+## 4. Запуск
+
+### Docker (основний спосіб)
 
 ```bash
-cp .env.example .env    # edit JWT secrets if you like
+cp .env.example .env    # за бажанням відредагуйте JWT-секрети
 docker compose up --build
 ```
 
-- Frontend: http://localhost:8080
-- Backend API + Swagger docs: http://localhost:3000/docs (also reachable at `/docs` and `/api/*` through the frontend's nginx proxy on :8080)
-- Postgres migrations run automatically on backend container start.
+- Фронтенд: http://localhost:8080
+- Backend API + Swagger-документація: http://localhost:3000/docs (також доступно через `/docs` та `/api/*` через nginx-проксі фронтенду на :8080)
+- Міграції Postgres виконуються автоматично при старті backend-контейнера.
 
-Seed demo data (categories, 8 products, an admin + a customer account, ~40 historical orders for the dashboard) once the stack is up:
+Засіяти демо-дані (категорії, 8 товарів, акаунти адміна та покупця) після підняття стеку:
 
 ```bash
 docker compose exec backend npm run seed
 ```
 
-Seeded logins: `admin@minishop.dev` / `Admin123!` and `customer@minishop.dev` / `Customer123!`.
+Тестові логіни: `admin@minishop.dev` / `Admin123!` та `customer@minishop.dev` / `Customer123!`.
 
-### Local development (without Docker)
+### Локальна розробка (без Docker)
 
-Requires a local Postgres + Redis (or point `DATABASE_URL`/`REDIS_URL` at any reachable instance).
+Потрібен локальний Postgres + Redis (або вкажіть `DATABASE_URL`/`REDIS_URL` на будь-який доступний інстанс).
 
 ```bash
-npm install                                   # installs both workspaces
-cp backend/.env.example backend/.env          # fill in DATABASE_URL / REDIS_URL
+npm install                                   # встановлює обидва workspace
+cp backend/.env.example backend/.env          # заповніть DATABASE_URL / REDIS_URL
 cd backend && npx prisma migrate dev && npm run seed && cd ..
 npm run dev:backend                           # http://localhost:3000
-npm run dev:frontend                          # http://localhost:5173 (proxies /api -> :3000)
+npm run dev:frontend                          # http://localhost:5173 (проксіює /api -> :3000)
 ```
 
 ### Storybook
@@ -103,36 +103,36 @@ npm run dev:frontend                          # http://localhost:5173 (proxies /
 npm run storybook            # http://localhost:6006
 ```
 
-Stories cover `Button`, `Input`, `Select`, `Dialog`, `StatusBadge`, and `ProductCard` (in-stock / low-stock / out-of-stock).
+Історії покривають `Button`, `Input`, `Select`, `Dialog`, `StatusBadge` та `ProductCard` (в наявності / залишок закінчується / немає в наявності).
 
 ---
 
-## 5. Tests
+## 5. Тести
 
 ```bash
 npm run test:backend         # unit — InventoryService + OrdersService.checkout
-npm run test:e2e:backend     # e2e  — needs a real Postgres + Redis (see below)
+npm run test:e2e:backend     # e2e  — потребує реальних Postgres + Redis (див. нижче)
 ```
 
-- **Unit** ([`test/unit/inventory.service.spec.ts`](backend/test/unit/inventory.service.spec.ts)): asserts the conditional-update-then-check-affected-rows logic throws on insufficient stock, and includes a deterministic simulation of two racing decrements against a shared in-memory "stock" counter (exactly one succeeds). [`test/unit/orders.service.spec.ts`](backend/test/unit/orders.service.spec.ts) covers checkout orchestration (total calculation, order-item price/name snapshotting, cart clearing, exactly-once queue enqueue).
-- **e2e** ([`test/e2e/checkout.e2e-spec.ts`](backend/test/e2e/checkout.e2e-spec.ts), run against a real Postgres): add-to-cart → checkout → stock verification, a rejected-checkout-on-insufficient-stock case, and **two concurrent checkout requests for the same last unit**, asserting exactly one `201` and one `409` with final stock at `0`. This is the strongest proof of §2's correctness.
+- **Unit** ([`test/unit/inventory.service.spec.ts`](backend/test/unit/inventory.service.spec.ts)): перевіряє, що логіка "умовний UPDATE → перевірка кількості змінених рядків" кидає помилку при нестачі товару, і включає детерміновану симуляцію двох конкурентних списань над спільним "лічильником залишку" в пам'яті (успішним стає рівно одне). [`test/unit/orders.service.spec.ts`](backend/test/unit/orders.service.spec.ts) покриває оркестрацію checkout (розрахунок суми, фіксація ціни/назви в позиціях замовлення, очищення кошика, рівно один виклик постановки в чергу).
+- **e2e** ([`test/e2e/checkout.e2e-spec.ts`](backend/test/e2e/checkout.e2e-spec.ts), запускається проти реального Postgres): додавання в кошик → checkout → перевірка залишку, відхилення checkout при нестачі товару, а також **два одночасні запити на checkout за останню одиницю товару**, з перевіркою, що рівно один запит повертає `201`, а другий — `409`, і фінальний залишок дорівнює `0`. Це найпереконливіший доказ коректності §2.
 
-The e2e suite needs `DATABASE_URL`/`REDIS_URL` pointing at a real Postgres/Redis (CI spins these up as service containers — see `.github/workflows/ci.yml`).
-
----
-
-## 6. What was skipped / would be done differently with more time
-
-- **Payment is fully mocked** per the assignment — card fields are validated client- and server-side (format only) and never persisted.
-- **Refresh tokens** are returned in the JSON body and stored client-side (`localStorage` via Zustand's persist) rather than as an httpOnly cookie — simpler to reason about across the Vite dev server / Docker nginx split without extra CORS/cookie-domain plumbing, but an httpOnly cookie would be the better production default.
-- **Docker image size**: both Dockerfiles copy the full (hoisted, workspace-wide) `node_modules` into the runtime stage for simplicity; a leaner build would prune to the backend-only dependency subset.
-- **`multer@1.x`** is pinned for compatibility with this NestJS/`platform-express` version; multer 2.x fixes several known advisories and would be the first upgrade in a follow-up pass. The image-upload endpoint is admin-only, which limits exposure in the meantime.
-- **Storybook** covers the 6 most representative components (buttons, product card, form inputs, status badge, modal) rather than the full shadcn/ui kit, per the assignment's explicit "key components only" scope.
-- **Frontend component/unit tests** were left out in favor of the mandatory backend unit + e2e coverage and a full manual/automated browser smoke test of every page (customer + admin flows) during development.
-- Analytics aggregation queries (`AnalyticsService.topProducts`) do a group-by followed by a per-product re-query rather than a single SQL aggregation — fine at this data scale, would move to a single `$queryRaw` aggregate if the order volume grew.
+Для e2e-набору потрібні `DATABASE_URL`/`REDIS_URL`, що вказують на реальні Postgres/Redis (у CI вони піднімаються як сервіс-контейнери — див. `.github/workflows/ci.yml`).
 
 ---
 
-## 7. Environment variables
+## 6. Що свідомо пропущено / що зробив би інакше з більшим запасом часу
 
-See [`.env.example`](.env.example) (Docker Compose / root), [`backend/.env.example`](backend/.env.example), and [`frontend/.env.example`](frontend/.env.example).
+- **Оплата повністю замокана** відповідно до умов завдання — поля картки валідуються на клієнті й на сервері (лише формат) і ніколи не зберігаються.
+- **Refresh-токени** повертаються в тілі JSON і зберігаються на клієнті (`localStorage` через persist Zustand), а не в httpOnly-кукі — простіше працює на стику Vite dev-сервера та Docker/nginx без додаткової настройки CORS/cookie-домену, але httpOnly-кукі був би кращим варіантом за замовчуванням для продакшену.
+- **Розмір Docker-образів**: обидва Dockerfile для простоти копіюють увесь (піднятий на рівень workspace) `node_modules` у рантайм-стадію; ощадливіша збірка обрізала б залежності лише до підмножини, потрібної бекенду.
+- **`multer@1.x`** зафіксований для сумісності з цією версією NestJS/`platform-express`; multer 2.x закриває кілька відомих вразливостей і був би першим кандидатом на оновлення в наступній ітерації. Ендпоінт завантаження зображень доступний лише адміну, що обмежує ризик на цей час.
+- **Storybook** покриває 6 найбільш показових компонентів (кнопки, картка товару, поля форми, бейдж статусу, модалка), а не весь набір shadcn/ui — відповідно до явного уточнення завдання "лише ключові компоненти".
+- **Frontend-тести компонентів** свідомо не робились на користь обов'язкового unit + e2e покриття бекенду та повного ручного/автоматизованого смоук-тестування кожної сторінки (флоу покупця й адміна) під час розробки.
+- Запити аналітики (`AnalyticsService.topProducts`) роблять групування, а потім окремий повторний запит по кожному товару, замість єдиної SQL-агрегації — прийнятно при поточному обсязі даних, але при зростанні кількості замовлень варто перейти на єдиний агрегувальний `$queryRaw`.
+
+---
+
+## 7. Змінні середовища
+
+Див. [`.env.example`](.env.example) (Docker Compose / корінь), [`backend/.env.example`](backend/.env.example) та [`frontend/.env.example`](frontend/.env.example).
