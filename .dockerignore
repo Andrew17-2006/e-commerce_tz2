@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/storybook-static
+**/*.tsbuildinfo
+backend/uploads/*
+!backend/uploads/.gitkeep
+.git
+.github
+*.log
+.env
+.env.*
+!.env.example
+frontend/.storybook

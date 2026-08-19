@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+storybook-static/
+*.tsbuildinfo
+.env
+.env.*.local
+*.local
+
+# Prisma
+backend/prisma/migrations/dev.db
+
+# Uploads (runtime data, not source)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Logs
+npm-debug.log*
+*.log
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Coverage
+coverage/
