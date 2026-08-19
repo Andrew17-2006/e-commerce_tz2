@@ -14,6 +14,7 @@
     "lint:frontend": "npm run lint -w frontend",
     "test:backend": "npm run test -w backend",
     "test:e2e:backend": "npm run test:e2e -w backend",
+    "test:frontend": "npm run test -w frontend",
     "storybook": "npm run storybook -w frontend"
   }
 }
