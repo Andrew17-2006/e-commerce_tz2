@@ -42,36 +42,37 @@ export class AnalyticsService {
 
   async topProducts(range: AnalyticsRangeDto, limit: number) {
     const createdAt = this.dateFilter(range);
-    const grouped = await this.prisma.orderItem.groupBy({
-      by: ['productId', 'productName'],
-      where: {
-        order: {
-          status: { notIn: NON_REVENUE_STATUSES },
-          ...(createdAt ? { createdAt } : {}),
-        },
-      },
-      _sum: { qty: true, unitPrice: true },
-    });
 
-    const withRevenue = await Promise.all(
-      grouped.map(async (g) => {
-        const items = await this.prisma.orderItem.findMany({
-          where: {
-            productId: g.productId,
-            order: {
-              status: { notIn: NON_REVENUE_STATUSES },
-              ...(createdAt ? { createdAt } : {}),
-            },
-          },
-          select: { qty: true, unitPrice: true },
-        });
-        const sold = items.reduce((sum, i) => sum + i.qty, 0);
-        const revenue = items.reduce((sum, i) => sum + i.qty * Number(i.unitPrice), 0);
-        return { productId: g.productId, name: g.productName, sold, revenue };
-      }),
-    );
+    const dateConditions: Prisma.Sql[] = [];
+    if (createdAt?.gte) dateConditions.push(Prisma.sql`o."createdAt" >= ${createdAt.gte}`);
+    if (createdAt?.lte) dateConditions.push(Prisma.sql`o."createdAt" <= ${createdAt.lte}`);
+    const dateFilterSql = dateConditions.length
+      ? Prisma.sql`AND ${Prisma.join(dateConditions, ' AND ')}`
+      : Prisma.empty;
 
-    return withRevenue.sort((a, b) => b.revenue - a.revenue).slice(0, limit);
+    const rows = await this.prisma.$queryRaw<
+      Array<{ productId: string; name: string; sold: number; revenue: number }>
+    >(Prisma.sql`
+      SELECT
+        oi."productId" AS "productId",
+        oi."productName" AS "name",
+        SUM(oi.qty)::int AS sold,
+        SUM(oi.qty * oi."unitPrice")::numeric(12,2) AS revenue
+      FROM "OrderItem" oi
+      INNER JOIN "Order" o ON o.id = oi."orderId"
+      WHERE o.status::text NOT IN (${Prisma.join(NON_REVENUE_STATUSES)})
+      ${dateFilterSql}
+      GROUP BY oi."productId", oi."productName"
+      ORDER BY revenue DESC
+      LIMIT ${limit}
+    `);
+
+    return rows.map((r) => ({
+      productId: r.productId,
+      name: r.name,
+      sold: Number(r.sold),
+      revenue: Number(r.revenue),
+    }));
   }
 
   async salesByDay(days: number) {
