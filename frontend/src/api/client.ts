@@ -4,6 +4,7 @@ import type { AuthResponse } from "@/types/api";
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? "/api",
+  withCredentials: true,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -17,13 +18,11 @@ apiClient.interceptors.request.use((config) => {
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = useAuthStore.getState().refreshToken;
-  if (!refreshToken) return null;
-
   try {
     const { data } = await axios.post<AuthResponse>(
       `${apiClient.defaults.baseURL}/auth/refresh`,
-      { refreshToken },
+      undefined,
+      { withCredentials: true },
     );
     useAuthStore.getState().setAuth(data);
     return data.accessToken;

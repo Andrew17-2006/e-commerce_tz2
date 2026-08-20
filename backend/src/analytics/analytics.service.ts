@@ -107,7 +107,10 @@ export class AnalyticsService {
   async exportCsv(range: AnalyticsRangeDto): Promise<string> {
     const createdAt = this.dateFilter(range);
     const orders = await this.prisma.order.findMany({
-      where: { ...(createdAt ? { createdAt } : {}) },
+      where: {
+        status: { notIn: NON_REVENUE_STATUSES },
+        ...(createdAt ? { createdAt } : {}),
+      },
       include: { items: true },
       orderBy: { createdAt: 'asc' },
     });
